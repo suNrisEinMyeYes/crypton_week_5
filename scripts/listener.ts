@@ -1,55 +1,53 @@
-
-import Web3 from 'web3';
-//import {BridgeEth} from "../artifacts/contracts/BridgeETH.sol/BridgeETH.json" 
-//import BridgeBsc from "../artifacts/contracts/BridgeBSC.sol/"
-const ArtsBridgeEth = require("../artifacts/contracts/BridgeETH.sol/BridgeETH.json");
-const ArtsBridgeBsc = require("../artifacts/contracts/BridgeBSC.sol/BridgeBSC.json");
+import * as dotenv from "dotenv";
+import '@nomiclabs/hardhat-ethers';
+//const ArtsBridgeEth = require("../artifacts/contracts/BridgeETH.sol/BridgeETH.json");
+//const ArtsBridgeBsc = require("../artifacts/contracts/BridgeBSC.sol/BridgeBSC.json");
 import {BridgeBsc, BridgeEth} from "../config"
 
-import "../artifacts/build-info/"
+import  abiBsc from "../abis/bridgeBsc.json"
+import abiEth from "../abis/bridgeEth.json"
+import { ethers } from 'hardhat';
 
-const web3Eth = new Web3('https://rinkeby.infura.io/v3/f3edb6b2feec4708aff6c0c8c3d233bf');
-const web3Bsc = new Web3('https://data-seed-prebsc-1-s1.binance.org:8545');
-const adminPrivKey = '';
-const { address: admin } = web3Bsc.eth.accounts.wallet.add(adminPrivKey);
+//import abiBsc from "../artifacts/contracts/BridgeBSC.sol/BridgeBsc.json"
+//import abiEth from "../artifacts/contracts/BridgeETH.sol/BridgeEth.json"
 
-const bridgeEth = new web3Eth.eth.Contract(
-  ArtsBridgeEth.abi,
-  BridgeEth
-  );
 
-const bridgeBsc = new web3Bsc.eth.Contract(
-  ArtsBridgeBsc.abi,
-  BridgeBsc
-  );
+async function listen() {
+  
 
-bridgeEth.events.Transfer(
-  {fromBlock: 0, step: 0}
-)
-.on('data', async (event: { returnValues: { from: any; to: any; amount: any; date: any; nonce: any; signature: any; }; }) => {
-  const { from, to, amount, date, nonce, signature } = event.returnValues;
+dotenv.config();
 
-  const tx = bridgeBsc.methods.swap(from, to, amount, nonce, signature);
-  const [gasPrice, gasCost] = await Promise.all([
-    web3Bsc.eth.getGasPrice(),
-    tx.estimateGas({from: admin}),
-  ]);
-  const data = tx.encodeABI();
-  const txData = {
-    from: admin,
-    to: bridgeBsc.options.address,
-    data,
-    gas: gasCost,
-    gasPrice
-  };
-  const receipt = await web3Bsc.eth.sendTransaction(txData);
-  console.log(`Transaction hash: ${receipt.transactionHash}`);
-  console.log(`
-    Processed transfer:
-    - from ${from} 
-    - to ${to} 
-    - amount ${amount} tokens
-    - date ${date}
-    - nonce ${nonce}
-  `);
+
+let providerBsc = new ethers.providers.JsonRpcProvider("https://data-seed-prebsc-1-s1.binance.org:8545")
+let providerEth = new ethers.providers.JsonRpcProvider("https://rinkeby.infura.io/v3/f3edb6b2feec4708aff6c0c8c3d233bf")
+
+let wallet = new ethers.Wallet(process.env.PRIVATE_KEY !== undefined ? process.env.PRIVATE_KEY : "")
+
+let contractEth = new ethers.Contract(BridgeEth, abiEth.abi, providerEth)
+let contractBsc = new ethers.Contract(BridgeBsc, abiBsc.abi, providerBsc)
+
+console.log((await providerBsc.getNetwork()).chainId)
+console.log("sdfsf")
+console.log()
+
+
+
+
+contractBsc.on("Transfer", async (from, to, amount, date, nonce, chainFrom, chainTo) => {
+  let msg = ethers.utils.solidityKeccak256(
+    ["address", "address", "uint256", "uint"],
+    [from, to, amount, nonce]
+  )
+  let signature = await wallet.signMessage(ethers.utils.arrayify(msg))
+
+  let sig = ethers.utils.splitSignature(signature)
+  console.log(from, to, amount, nonce, sig.v, sig.r, sig.s)
 });
+
+}
+
+
+listen()
+
+
+

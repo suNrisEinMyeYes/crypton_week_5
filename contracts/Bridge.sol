@@ -1,32 +1,72 @@
 pragma solidity ^0.8.0;
 
 import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+//import '@openzeppelin/contracts/utils/Counters.sol';
 import './IToken.sol';
 
 contract BridgeMain {
-  address public admin;
   IToken public token;
-  mapping(address => mapping(uint => bool)) public processedNonces;
+  
+  mapping(bytes32 => bool) public completed;
+  address private _validator;
+  mapping(address => string) public tokens;
+  mapping(uint => string) public chains;
+  //using Counters for Counters.Counter;  
+  //Counters.Counter private nonce;
 
-  enum Step { Burn, Mint }
   event Transfer(
     address from,
     address to,
     uint amount,
     uint date,
     uint nonce,
-    bytes signature,
-    Step indexed step
+    uint chainFrom,
+    uint chainTo
   );
 
   constructor(address _token) {
-    admin = msg.sender;
     token = IToken(_token);
+    
   }
 
-  function burn(address to, uint amount, uint nonce, bytes calldata signature) external {
-    require(processedNonces[msg.sender][nonce] == false, 'transfer already processed');
-    processedNonces[msg.sender][nonce] = true;
+  function setToken(address addr) public{
+    require(keccak256(abi.encodePacked(tokens[addr])) != keccak256(abi.encodePacked("")), "doesn't exist");
+    token = IToken(addr);
+  }
+
+  function setValidator(address addr) public{
+    _validator = addr;
+  }
+
+  function includeToken(address addr, string memory name) public{
+    require(keccak256(abi.encodePacked(tokens[addr])) != keccak256(abi.encodePacked("")), "already exist");
+    tokens[addr] = name;
+  }
+  function excludeToken(address addr) public{
+    tokens[addr] = "";
+  }
+
+  function updateChainById(address addr) public{
+  }
+
+  /*function getNewNonce() private returns(uint){
+    nonce.increment();
+    return nonce.current();
+  }
+  */
+
+
+  function swap(address to, uint256 amount, uint chainFrom, uint chainTo, uint nonce) public {
+    bytes32 message = keccak256(abi.encodePacked(
+      to, 
+      amount,
+      nonce,
+      chainFrom,
+      chainTo
+    ));
+    
+    require(completed[message] == false, 'transfer already processed');
+    completed[message] = true;
     token.burn(msg.sender, amount);
     emit Transfer(
       msg.sender,
@@ -34,37 +74,22 @@ contract BridgeMain {
       amount,
       block.timestamp,
       nonce,
-      signature,
-      Step.Burn
+      chainFrom,
+      chainTo
     );
   }
 
-  function mint(
-    address from, 
-    address to, 
-    uint amount, 
-    uint nonce,
-    bytes calldata signature
-  ) external {
+  function redeem(address from, address to, uint256 amount, uint nonce, bytes32 r, bytes32 s, uint8 v) external {
     bytes32 message = prefixed(keccak256(abi.encodePacked(
-      from, 
+      from,
       to, 
       amount,
       nonce
     )));
-    require(recoverSigner(message, signature) == from , 'wrong signature');
-    require(processedNonces[from][nonce] == false, 'transfer already processed');
-    processedNonces[from][nonce] = true;
+    require(ecrecover(message, v, r, s) == _validator, "wrong signature");
+    require(completed[message] == false, 'transfer already processed');
+    completed[message] = true;
     token.mint(to, amount);
-    emit Transfer(
-      from,
-      to,
-      amount,
-      block.timestamp,
-      nonce,
-      signature,
-      Step.Mint
-    );
   }
 
   function prefixed(bytes32 hash) internal pure returns (bytes32) {
@@ -72,42 +97,5 @@ contract BridgeMain {
       '\x19Ethereum Signed Message:\n32', 
       hash
     ));
-  }
-
-  function recoverSigner(bytes32 message, bytes memory sig)
-    internal
-    pure
-    returns (address)
-  {
-    uint8 v;
-    bytes32 r;
-    bytes32 s;
-  
-    (v, r, s) = splitSignature(sig);
-  
-    return ecrecover(message, v, r, s);
-  }
-
-  function splitSignature(bytes memory sig)
-    internal
-    pure
-    returns (uint8, bytes32, bytes32)
-  {
-    require(sig.length == 65);
-  
-    bytes32 r;
-    bytes32 s;
-    uint8 v;
-  
-    assembly {
-        // first 32 bytes, after the length prefix
-        r := mload(add(sig, 32))
-        // second 32 bytes
-        s := mload(add(sig, 64))
-        // final byte (first byte of the next 32 bytes)
-        v := byte(0, mload(add(sig, 96)))
-    }
-  
-    return (v, r, s);
   }
 }
